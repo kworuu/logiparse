@@ -1,134 +1,148 @@
 import json
 import os
+import base64
 from dotenv import load_dotenv
 import google.generativeai as genai
-import pymupdf
-import re
-
 from datetime import datetime
 
-# This loads the hidden variables from your .env file
 load_dotenv()
-
-# This reaches into the environment and securely grabs your key
 my_secret_key = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=my_secret_key)
 
+# Maps file extensions to MIME types Gemini understands
+MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+}
 
-def extract_text_from_pdf(pdf_path: str) -> str:
-    """Extract raw text from a PDF file."""
-    doc = pymupdf.open(pdf_path)
-    full_text = ""
-    for page in doc:
-        full_text += page.get_text()
-    doc.close()
-    return full_text
+EXTRACTION_PROMPT = """You are an expert logistics data extractor.
+Look at this document (it may be a scanned image, photo, or PDF of an invoice or waybill).
+Extract all the relevant fields and return ONLY a valid raw JSON object.
+Do not add Markdown code blocks or any explanation — just the JSON.
+If a field is missing or unreadable, return null for that field.
+
+Required keys:
+- invoice_number
+- date
+- sender
+- receiver
+- total_weight (include unit, e.g. '45.5 kg')
+- total_amount (numbers only, no commas or currency symbols)
+- currency (e.g. PHP, USD)
+- tracking_number
+- items (list of objects with keys: description, quantity, unit_price, line_total)
+"""
 
 
-def extract_text_from_string(raw_text: str) -> str:
-    """Use raw text directly (for plain text/demo inputs)."""
-    return raw_text
-
-
-def parse_invoice(text: str) -> dict:
+def parse_invoice_from_file(file_path: str) -> dict:
     """
-    Gemini AI extracts key logistics fields from raw invoice/waybill text.
-    Returns a structured dictionary.
+    Send a file (PDF, PNG, JPG) directly to Gemini for extraction.
+    Gemini reads it natively — no text conversion needed.
     """
+    ext = os.path.splitext(file_path)[1].lower()
+    mime_type = MIME_TYPES.get(ext)
 
-    prompt = f"""You are an expert data extractor. Read the following invoice text messages and extract the details.
-    Return ONLY  a valid, raw JSON object. Do not add Markdown code blocks (like '''json). If a field is missing, return null.
+    if not mime_type:
+        raise ValueError(f"Unsupported file type: {ext}")
 
-    Required Keys:
-    - invoice_number
-    - date
-    - sender
-    - receiver
-    - total_weight (include the unit e.g..., '850 kg')
-    - total_amount (numbers only, no commas)
-    - currency (e.g., USD, PHP)
-    - tracking_number
-    - items (a list of objects with keys: description, quantity, unit_price, line_total)
-
-    Invoice text:
-    {text}
-    """
+    with open(file_path, "rb") as f:
+        file_bytes = f.read()
+    encoded = base64.standard_b64encode(file_bytes).decode("utf-8")
 
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-        response = model.generate_content(prompt)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content([
+            {"mime_type": mime_type, "data": encoded},
+            EXTRACTION_PROMPT
+        ])
 
-        # Sometimes the AI tries to be helpful and wraps the JSON in markdown blocks.
-        # This cleans it up so Python doesn't crash.
         clean_text = response.text.strip().removeprefix(
-            '```json').removesuffix('```').strip()
-
-        # Converts the text response into a real Python dictionary
+            "```json").removesuffix("```").strip()
         result = json.loads(clean_text)
-
-        # Re-add the raw text preview to prevent Streamlit from breaking
-        result["raw_text_preview"] = text[:300] + \
-            "..." if len(text) > 300 else text
-
+        result["raw_text_preview"] = f"[Extracted from {ext.upper()} file via Gemini Vision]"
         return result
 
     except Exception as e:
-        print(f"AI Extraction has failed: {e}")
-        # If the AI fails or the internet drops, return empty data so the app doesn't crash
-        return {
-            "invoice_number": None,
-            "date": None,
-            "sender": None,
-            "receiver": None,
-            "total_weight": None,
-            "total_amount": None,
-            "currency": None,
-            "items": [],
-            "tracking_number": None,
-            "raw_text_preview": text[:300] + "..."
-        }
+        print(f"AI extraction failed: {e}")
+        return _empty_result(f"Extraction failed: {e}")
+
+
+def parse_invoice_from_text(text: str) -> dict:
+    """
+    Send plain pasted text to Gemini for extraction.
+    """
+    prompt = EXTRACTION_PROMPT + f"\n\nDocument text:\n{text}"
+
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content(prompt)
+
+        clean_text = response.text.strip().removeprefix(
+            "```json").removesuffix("```").strip()
+        result = json.loads(clean_text)
+        result["raw_text_preview"] = text[:300] + \
+            "..." if len(text) > 300 else text
+        return result
+
+    except Exception as e:
+        print(f"AI extraction failed: {e}")
+        return _empty_result(f"Extraction failed: {e}")
+
+
+def _empty_result(preview: str) -> dict:
+    """Return a blank result when extraction fails."""
+    return {
+        "invoice_number": None,
+        "date": None,
+        "sender": None,
+        "receiver": None,
+        "total_weight": None,
+        "total_amount": None,
+        "currency": None,
+        "items": [],
+        "tracking_number": None,
+        "raw_text_preview": preview
+    }
 
 
 def validate_extracted_data(data: dict) -> dict:
     """
-    Run basic validation checks on extracted fields.
-    Returns a report of issues found.
+    Run validation checks on extracted fields.
     """
     issues = []
     warnings = []
 
-    if not data["invoice_number"]:
+    if not data.get("invoice_number"):
         issues.append("❌ Invoice number not found")
-    if not data["date"]:
-        warnings.append(
-            "⚠️  Date not detected — may be missing or in unusual format")
-    if not data["sender"]:
+    if not data.get("date"):
+        warnings.append("⚠️  Date not detected — may be missing or unusual format")
+    if not data.get("sender"):
         warnings.append("⚠️  Sender/Shipper not found")
-    if not data["receiver"]:
+    if not data.get("receiver"):
         warnings.append("⚠️  Receiver/Consignee not found")
-    if not data["total_amount"]:
+    if not data.get("total_amount"):
         issues.append("❌ Total amount not found")
     else:
         try:
-            val = float(data["total_amount"])
+            val = float(str(data["total_amount"]).replace(",", ""))
             if val <= 0:
-                issues.append(
-                    "❌ Total amount is zero or negative — suspicious")
+                issues.append("❌ Total amount is zero or negative — suspicious")
         except ValueError:
             issues.append("❌ Total amount is not a valid number")
 
-    if data["items"]:
-        for i, item in enumerate(data["items"]):
-            try:
-                calc = float(item["quantity"]) * float(item["unit_price"])
-                stated = float(item["line_total"])
-                if abs(calc - stated) > 0.5:
-                    issues.append(
-                        f"❌ Line item '{item['description']}': "
-                        f"Qty × UnitPrice ({calc:.2f}) ≠ LineTotal ({stated:.2f})"
-                    )
-            except (ValueError, KeyError):
-                pass
+    for item in data.get("items", []):
+        try:
+            calc = float(item["quantity"]) * float(str(item["unit_price"]).replace(",", ""))
+            stated = float(str(item["line_total"]).replace(",", ""))
+            if abs(calc - stated) > 0.5:
+                issues.append(
+                    f"❌ Line item '{item['description']}': "
+                    f"Qty × UnitPrice ({calc:.2f}) ≠ LineTotal ({stated:.2f})"
+                )
+        except (ValueError, KeyError):
+            pass
 
     status = "PASS ✅" if not issues else "FAIL ❌"
 
@@ -136,35 +150,36 @@ def validate_extracted_data(data: dict) -> dict:
         "status": status,
         "issues": issues,
         "warnings": warnings,
-        "field_coverage": f"{sum(1 for v in [data['invoice_number'], data['date'], data['sender'], data['receiver'], data['total_amount']] if v)}/5 key fields extracted"
+        "field_coverage": f"{sum(1 for v in [data.get('invoice_number'), data.get('date'), data.get('sender'), data.get('receiver'), data.get('total_amount')] if v)}/5 key fields extracted"
     }
 
 
-def process_invoice(source, is_pdf=False) -> dict:
-    """Main pipeline: extract → parse → validate → output."""
-    if is_pdf:
-        raw_text = extract_text_from_pdf(source)
+def process_invoice(source, source_type="text") -> dict:
+    """
+    Main pipeline: extract → validate → output.
+    source_type: 'text', 'pdf', 'image'
+    """
+    if source_type == "text":
+        parsed = parse_invoice_from_text(source)
     else:
-        raw_text = source  # treat as plain text
+        # Both PDF and image go directly to Gemini Vision
+        parsed = parse_invoice_from_file(source)
 
-    parsed = parse_invoice(raw_text)
     validation = validate_extracted_data(parsed)
 
-    output = {
+    return {
         "metadata": {
             "processed_at": datetime.now().isoformat(),
-            "source_type": "PDF" if is_pdf else "Text"
+            "source_type": source_type.upper()
         },
         "extracted_data": parsed,
         "validation_report": validation
     }
 
-    return output
 
-
-# --- Demo / CLI usage ---
+# --- CLI demo ---
 if __name__ == "__main__":
-    sample_invoice = """
+    sample = """
     LOGISTICS INVOICE
     Invoice No: INV-2024-00892
     Date: February 20, 2024
@@ -173,7 +188,6 @@ if __name__ == "__main__":
     From: ABC Warehousing Corp., Mandaue City, Cebu
     To: XYZ Retail Store, Makati City, Metro Manila
 
-    Items:
     Industrial Fan Motor     2    1500.00    3000.00
     Conveyor Belt Segment    5     800.00    4000.00
     Safety Gloves (box)     10     250.00    2500.00
@@ -181,6 +195,5 @@ if __name__ == "__main__":
     Total Weight: 45.5 kg
     Total Amount: PHP 9,500.00
     """
-
-    result = process_invoice(sample_invoice, is_pdf=False)
+    result = process_invoice(sample, source_type="text")
     print(json.dumps(result, indent=2))

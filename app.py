@@ -1,7 +1,6 @@
 """
 LogiParse - Logistics Invoice & Waybill Extractor.
-This module provides a Streamlit web interface to extract, 
-parse, and validate data from PDF invoices and text.
+Supports PDF, PNG, and JPG via Gemini Vision — no text conversion needed.
 """
 
 import tempfile
@@ -10,8 +9,8 @@ import sys
 import json
 import streamlit as st
 
-from extractor import process_invoice
 sys.path.insert(0, os.path.dirname(__file__))
+from extractor import process_invoice
 
 
 # ─── Page Config ─────────────────────────────────────────────────────────────
@@ -26,12 +25,8 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap');
 
-    html, body, [class*="css"] {
-        font-family: 'DM Sans', sans-serif;
-    }
-
+    html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
     .main { background-color: #0d1117; }
-
     h1, h2, h3 { font-family: 'Space Mono', monospace; }
 
     .hero-title {
@@ -42,14 +37,12 @@ st.markdown("""
         letter-spacing: -1px;
         margin-bottom: 0;
     }
-
     .hero-sub {
         color: #8b949e;
         font-size: 1rem;
         margin-top: 4px;
         margin-bottom: 2rem;
     }
-
     .field-card {
         background: #161b22;
         border: 1px solid #30363d;
@@ -57,7 +50,6 @@ st.markdown("""
         padding: 14px 18px;
         margin-bottom: 10px;
     }
-
     .field-label {
         font-family: 'Space Mono', monospace;
         font-size: 0.7rem;
@@ -66,121 +58,60 @@ st.markdown("""
         letter-spacing: 1px;
         margin-bottom: 4px;
     }
-
-    .field-value {
-        font-size: 1rem;
-        color: #e6edf3;
-        font-weight: 600;
-    }
-
-    .field-missing {
-        color: #484f58;
-        font-style: italic;
-        font-size: 0.9rem;
-    }
-
+    .field-value { font-size: 1rem; color: #e6edf3; font-weight: 600; }
+    .field-missing { color: #484f58; font-style: italic; font-size: 0.9rem; }
     .status-pass {
-        background: #0d2818;
-        border: 1px solid #238636;
-        border-radius: 8px;
-        padding: 12px 16px;
-        color: #3fb950;
-        font-family: 'Space Mono', monospace;
-        font-size: 1rem;
+        background: #0d2818; border: 1px solid #238636;
+        border-radius: 8px; padding: 12px 16px;
+        color: #3fb950; font-family: 'Space Mono', monospace; font-size: 1rem;
     }
-
     .status-fail {
-        background: #2d1117;
-        border: 1px solid #da3633;
-        border-radius: 8px;
-        padding: 12px 16px;
-        color: #f85149;
-        font-family: 'Space Mono', monospace;
-        font-size: 1rem;
+        background: #2d1117; border: 1px solid #da3633;
+        border-radius: 8px; padding: 12px 16px;
+        color: #f85149; font-family: 'Space Mono', monospace; font-size: 1rem;
     }
-
     .issue-item {
-        background: #2d1117;
-        border-left: 3px solid #da3633;
-        padding: 8px 12px;
-        margin: 4px 0;
-        border-radius: 0 6px 6px 0;
-        font-size: 0.9rem;
-        color: #ffa198;
+        background: #2d1117; border-left: 3px solid #da3633;
+        padding: 8px 12px; margin: 4px 0;
+        border-radius: 0 6px 6px 0; font-size: 0.9rem; color: #ffa198;
     }
-
     .warning-item {
-        background: #272115;
-        border-left: 3px solid #d29922;
-        padding: 8px 12px;
-        margin: 4px 0;
-        border-radius: 0 6px 6px 0;
-        font-size: 0.9rem;
-        color: #e3b341;
+        background: #272115; border-left: 3px solid #d29922;
+        padding: 8px 12px; margin: 4px 0;
+        border-radius: 0 6px 6px 0; font-size: 0.9rem; color: #e3b341;
     }
-
     .coverage-badge {
-        display: inline-block;
-        background: #1f3a5f;
-        color: #58a6ff;
-        font-family: 'Space Mono', monospace;
-        font-size: 0.75rem;
-        padding: 4px 10px;
-        border-radius: 20px;
-        border: 1px solid #1f6feb;
-        margin-top: 6px;
+        display: inline-block; background: #1f3a5f; color: #58a6ff;
+        font-family: 'Space Mono', monospace; font-size: 0.75rem;
+        padding: 4px 10px; border-radius: 20px;
+        border: 1px solid #1f6feb; margin-top: 6px;
     }
-
     .item-row {
-        display: flex;
-        justify-content: space-between;
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 8px;
-        padding: 10px 14px;
-        margin-bottom: 6px;
-        font-size: 0.9rem;
-        color: #e6edf3;
+        display: flex; justify-content: space-between;
+        background: #161b22; border: 1px solid #30363d;
+        border-radius: 8px; padding: 10px 14px;
+        margin-bottom: 6px; font-size: 0.9rem; color: #e6edf3;
     }
-
     .stTextArea textarea {
-        font-family: 'Space Mono', monospace;
-        font-size: 0.82rem;
-        background: #161b22 !important;
-        color: #e6edf3 !important;
+        font-family: 'Space Mono', monospace; font-size: 0.82rem;
+        background: #161b22 !important; color: #e6edf3 !important;
         border: 1px solid #30363d !important;
     }
-
     .stButton > button {
         background: linear-gradient(135deg, #1f6feb, #00e5ff22);
-        color: #58a6ff;
-        border: 1px solid #1f6feb;
-        font-family: 'Space Mono', monospace;
-        font-size: 0.85rem;
-        padding: 0.6rem 1.4rem;
-        border-radius: 8px;
-        width: 100%;
-        transition: all 0.2s;
+        color: #58a6ff; border: 1px solid #1f6feb;
+        font-family: 'Space Mono', monospace; font-size: 0.85rem;
+        padding: 0.6rem 1.4rem; border-radius: 8px;
+        width: 100%; transition: all 0.2s;
     }
-
-    .stButton > button:hover {
-        background: #1f6feb;
-        color: white;
-        border-color: #58a6ff;
-    }
-
-    .divider {
-        border: none;
-        border-top: 1px solid #21262d;
-        margin: 1.5rem 0;
-    }
+    .stButton > button:hover { background: #1f6feb; color: white; border-color: #58a6ff; }
+    .divider { border: none; border-top: 1px solid #21262d; margin: 1.5rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
 # ─── Header ──────────────────────────────────────────────────────────────────
-st.markdown('<div class="hero-title">LogiParse</div>', unsafe_allow_html=True)
-st.markdown('<div class="hero-sub">Logistics Invoice & Waybill Extractor — Paper to Structured Data</div>',
-            unsafe_allow_html=True)
+st.markdown('<div class="hero-title">📦 LogiParse</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-sub">Logistics Invoice & Waybill Extractor — Paper to Structured Data</div>', unsafe_allow_html=True)
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
 # ─── Input Section ───────────────────────────────────────────────────────────
@@ -191,7 +122,7 @@ with col_input:
 
     input_mode = st.radio(
         "Source type",
-        ["Paste Text", "Upload PDF"],
+        ["Paste Text", "Upload File (PDF / PNG / JPG)"],
         horizontal=True,
         label_visibility="collapsed"
     )
@@ -222,28 +153,41 @@ Total Amount: PHP 9,500.00"""
             label_visibility="collapsed"
         )
 
-        if st.button("⚡ Extract & Validate"):
+        if st.button(" Extract & Validate"):
             if text_input.strip():
-                with st.spinner("Parsing document..."):
-                    raw_result = process_invoice(text_input, is_pdf=False)
+                with st.spinner("Sending to Gemini AI..."):
+                    raw_result = process_invoice(text_input, source_type="text")
             else:
                 st.error("Please paste some invoice text first.")
 
     else:
         uploaded_file = st.file_uploader(
-            "Upload a PDF invoice or waybill",
-            type=["pdf"],
+            "Upload a PDF, PNG, or JPG invoice/waybill",
+            type=["pdf", "png", "jpg", "jpeg"],
             label_visibility="collapsed"
         )
 
         if uploaded_file:
+            file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+
+            # Show a preview if it's an image
+            if file_ext in [".png", ".jpg", ".jpeg"]:
+                st.image(uploaded_file, caption="Uploaded Image Preview", use_container_width=True)
+                uploaded_file.seek(0)  # Reset after preview read
+
             st.success(f"✅ Loaded: {uploaded_file.name}")
-            if st.button("⚡ Extract & Validate"):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+
+            if st.button(" Extract & Validate"):
+                # Determine source type for extractor
+                source_type = "pdf" if file_ext == ".pdf" else "image"
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
-                with st.spinner("Reading PDF and extracting data..."):
-                    raw_result = process_invoice(tmp_path, is_pdf=True)
+
+                with st.spinner(f"Gemini AI is reading your {file_ext.upper()[1:]}..."):
+                    raw_result = process_invoice(tmp_path, source_type=source_type)
+
                 os.unlink(tmp_path)
 
 # ─── Results Section ─────────────────────────────────────────────────────────
@@ -279,7 +223,6 @@ with col_results:
         if data.get("tracking_number"):
             field_card("Tracking Number", data["tracking_number"])
 
-        # Line Items
         if data.get("items"):
             st.markdown("**Line Items**")
             for item in data["items"]:
@@ -294,30 +237,23 @@ with col_results:
 
         st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-        # Validation Report
         st.markdown("### Validation Report")
-
         status = validation["status"]
         status_class = "status-pass" if "PASS" in status else "status-fail"
-        st.markdown(
-            f'<div class="{status_class}">{status}</div>', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="coverage-badge"> {validation["field_coverage"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="{status_class}">{status}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="coverage-badge"> {validation["field_coverage"]}</div>', unsafe_allow_html=True)
 
         if validation.get("issues"):
             st.markdown("<br>", unsafe_allow_html=True)
             for issue in validation["issues"]:
-                st.markdown(
-                    f'<div class="issue-item">{issue}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="issue-item">{issue}</div>', unsafe_allow_html=True)
 
         if validation.get("warnings"):
             for warning in validation["warnings"]:
-                st.markdown(
-                    f'<div class="warning-item">{warning}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="warning-item">{warning}</div>', unsafe_allow_html=True)
 
         st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
-        # JSON Export
         st.markdown("### Structured Output (JSON)")
         export_data = {
             "extracted_data": {k: v for k, v in data.items() if k != "raw_text_preview"},
@@ -337,6 +273,6 @@ with col_results:
         st.markdown("### Extracted Fields")
         st.markdown("""
         <div style="color:#484f58; padding: 60px 20px; text-align:center; font-family:'Space Mono',monospace; font-size:0.85rem; border: 1px dashed #30363d; border-radius:10px;">
-            Paste invoice text or upload a PDF<br>then click Extract & Validate
+            Paste invoice text or upload a PDF / PNG / JPG<br>then click Extract & Validate
         </div>
         """, unsafe_allow_html=True)
