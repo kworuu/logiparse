@@ -1,11 +1,18 @@
-import streamlit as st
-import json
+"""
+LogiParse - Logistics Invoice & Waybill Extractor.
+This module provides a Streamlit web interface to extract, 
+parse, and validate data from PDF invoices and text.
+"""
+
 import tempfile
 import os
 import sys
+import json
+import streamlit as st
 
-sys.path.insert(0, os.path.dirname(__file__))
 from extractor import process_invoice
+sys.path.insert(0, os.path.dirname(__file__))
+
 
 # ─── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -172,7 +179,8 @@ st.markdown("""
 
 # ─── Header ──────────────────────────────────────────────────────────────────
 st.markdown('<div class="hero-title">LogiParse</div>', unsafe_allow_html=True)
-st.markdown('<div class="hero-sub">Logistics Invoice & Waybill Extractor — Paper to Structured Data</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-sub">Logistics Invoice & Waybill Extractor — Paper to Structured Data</div>',
+            unsafe_allow_html=True)
 st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
 # ─── Input Section ───────────────────────────────────────────────────────────
@@ -291,17 +299,21 @@ with col_results:
 
         status = validation["status"]
         status_class = "status-pass" if "PASS" in status else "status-fail"
-        st.markdown(f'<div class="{status_class}">{status}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="coverage-badge"> {validation["field_coverage"]}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="{status_class}">{status}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="coverage-badge"> {validation["field_coverage"]}</div>', unsafe_allow_html=True)
 
         if validation.get("issues"):
             st.markdown("<br>", unsafe_allow_html=True)
             for issue in validation["issues"]:
-                st.markdown(f'<div class="issue-item">{issue}</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="issue-item">{issue}</div>', unsafe_allow_html=True)
 
         if validation.get("warnings"):
             for warning in validation["warnings"]:
-                st.markdown(f'<div class="warning-item">{warning}</div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="warning-item">{warning}</div>', unsafe_allow_html=True)
 
         st.markdown('<hr class="divider">', unsafe_allow_html=True)
 

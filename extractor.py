@@ -1,12 +1,23 @@
-import fitz  # PyMuPDF
-import re
 import json
+import os
+from dotenv import load_dotenv
+import google.generativeai as genai
+import pymupdf
+import re
+
 from datetime import datetime
+
+# This loads the hidden variables from your .env file
+load_dotenv()
+
+# This reaches into the environment and securely grabs your key
+my_secret_key = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=my_secret_key)
 
 
 def extract_text_from_pdf(pdf_path: str) -> str:
     """Extract raw text from a PDF file."""
-    doc = fitz.open(pdf_path)
+    doc = pymupdf.open(pdf_path)
     full_text = ""
     for page in doc:
         full_text += page.get_text()
@@ -21,100 +32,61 @@ def extract_text_from_string(raw_text: str) -> str:
 
 def parse_invoice(text: str) -> dict:
     """
-    Extract key logistics fields from raw invoice/waybill text.
+    Gemini AI extracts key logistics fields from raw invoice/waybill text.
     Returns a structured dictionary.
     """
-    result = {
-        "invoice_number": None,
-        "date": None,
-        "sender": None,
-        "receiver": None,
-        "total_weight": None,
-        "total_amount": None,
-        "currency": None,
-        "items": [],
-        "tracking_number": None,
-        "raw_text_preview": text[:300] + "..." if len(text) > 300 else text
-    }
 
-    # --- Invoice Number ---
-    inv_match = re.search(
-        r'(?:invoice\s*(?:no\.?|number|#|num)[:\s#]+)([A-Z0-9\-\/]+)',
-        text, re.IGNORECASE
-    )
-    if inv_match:
-        result["invoice_number"] = inv_match.group(1).strip()
+    prompt = f"""You are an expert data extractor. Read the following invoice text messages and extract the details.
+    Return ONLY  a valid, raw JSON object. Do not add Markdown code blocks (like '''json). If a field is missing, return null.
 
-    # --- Date ---
-    date_match = re.search(
-        r'(?:date|dated|issued)[:\s]*'
-        r'(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}'
-        r'|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}'
-        r'|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2},?\s+\d{4})',
-        text, re.IGNORECASE
-    )
-    if date_match:
-        result["date"] = date_match.group(1).strip()
+    Required Keys:
+    - invoice_number
+    - date
+    - sender
+    - receiver
+    - total_weight (include the unit e.g..., '850 kg')
+    - total_amount (numbers only, no commas)
+    - currency (e.g., USD, PHP)
+    - tracking_number
+    - items (a list of objects with keys: description, quantity, unit_price, line_total)
 
-    # --- Sender ---
-    sender_match = re.search(
-        r'(?:from|sender|shipper|consignor)[:\s]+([^\n,]+)',
-        text, re.IGNORECASE
-    )
-    if sender_match:
-        result["sender"] = sender_match.group(1).strip()
+    Invoice text:
+    {text}
+    """
 
-    # --- Receiver ---
-    receiver_match = re.search(
-        r'(?:to|receiver|recipient|consignee|billed\s+to|deliver\s+to)[:\s]+([^\n,]+)',
-        text, re.IGNORECASE
-    )
-    if receiver_match:
-        result["receiver"] = receiver_match.group(1).strip()
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt)
 
-    # --- Total Weight ---
-    weight_match = re.search(
-        r'(?:total\s+)?weight[:\s]*([\d,\.]+)\s*(kg|lbs?|g|tons?)?',
-        text, re.IGNORECASE
-    )
-    if weight_match:
-        unit = weight_match.group(2) or "kg"
-        result["total_weight"] = f"{weight_match.group(1).strip()} {unit}"
+        # Sometimes the AI tries to be helpful and wraps the JSON in markdown blocks.
+        # This cleans it up so Python doesn't crash.
+        clean_text = response.text.strip().removeprefix(
+            '```json').removesuffix('```').strip()
 
-    # --- Total Amount ---
-    amount_match = re.search(
-        r'(?:total|grand\s+total|amount\s+due|total\s+amount)[:\s]*'
-        r'(PHP|₱|\$|USD|EUR)?\s*([\d,\.]+)',
-        text, re.IGNORECASE
-    )
-    if amount_match:
-        result["currency"] = amount_match.group(1) or "PHP"
-        result["total_amount"] = amount_match.group(2).replace(",", "").strip()
+        # Converts the text response into a real Python dictionary
+        result = json.loads(clean_text)
 
-    # --- Tracking Number ---
-    tracking_match = re.search(
-        r'(?:tracking\s*(?:no|number|#)|waybill\s*(?:no|number|#))[:\s#]*([A-Z0-9\-]+)',
-        text, re.IGNORECASE
-    )
-    if tracking_match:
-        result["tracking_number"] = tracking_match.group(1).strip()
+        # Re-add the raw text preview to prevent Streamlit from breaking
+        result["raw_text_preview"] = text[:300] + \
+            "..." if len(text) > 300 else text
 
-    # --- Line Items ---
-    # Look for patterns like: ItemName   Qty   UnitPrice   Total
-    item_pattern = re.findall(
-        r'([A-Za-z][A-Za-z0-9\s\-]{2,30})\s+(\d+)\s+([\d,\.]+)\s+([\d,\.]+)',
-        text
-    )
-    for match in item_pattern[:10]:  # cap at 10 items
-        name, qty, unit_price, total = match
-        result["items"].append({
-            "description": name.strip(),
-            "quantity": int(qty),
-            "unit_price": unit_price.replace(",", ""),
-            "line_total": total.replace(",", "")
-        })
+        return result
 
-    return result
+    except Exception as e:
+        print(f"AI Extraction has failed: {e}")
+        # If the AI fails or the internet drops, return empty data so the app doesn't crash
+        return {
+            "invoice_number": None,
+            "date": None,
+            "sender": None,
+            "receiver": None,
+            "total_weight": None,
+            "total_amount": None,
+            "currency": None,
+            "items": [],
+            "tracking_number": None,
+            "raw_text_preview": text[:300] + "..."
+        }
 
 
 def validate_extracted_data(data: dict) -> dict:
@@ -128,7 +100,8 @@ def validate_extracted_data(data: dict) -> dict:
     if not data["invoice_number"]:
         issues.append("❌ Invoice number not found")
     if not data["date"]:
-        warnings.append("⚠️  Date not detected — may be missing or in unusual format")
+        warnings.append(
+            "⚠️  Date not detected — may be missing or in unusual format")
     if not data["sender"]:
         warnings.append("⚠️  Sender/Shipper not found")
     if not data["receiver"]:
@@ -139,7 +112,8 @@ def validate_extracted_data(data: dict) -> dict:
         try:
             val = float(data["total_amount"])
             if val <= 0:
-                issues.append("❌ Total amount is zero or negative — suspicious")
+                issues.append(
+                    "❌ Total amount is zero or negative — suspicious")
         except ValueError:
             issues.append("❌ Total amount is not a valid number")
 
