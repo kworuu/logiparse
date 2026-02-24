@@ -155,8 +155,13 @@ Total Amount: PHP 9,500.00"""
 
         if st.button(" Extract & Validate"):
             if text_input.strip():
-                with st.spinner("Sending to Gemini AI..."):
+                # Corrected: Text mode doesn't need file_ext
+                with st.status("LogiParse AI is analyzing text...", expanded=True) as status:
+                    st.write("🔍 Identifying document structure...")
                     raw_result = process_invoice(text_input, source_type="text")
+                    
+                    st.write("⚖️ Validating logistics data...")
+                    status.update(label="Text Processed Successfully!", state="complete", expanded=False)
             else:
                 st.error("Please paste some invoice text first.")
 
@@ -170,23 +175,25 @@ Total Amount: PHP 9,500.00"""
         if uploaded_file:
             file_ext = os.path.splitext(uploaded_file.name)[1].lower()
 
-            # Show a preview if it's an image
             if file_ext in [".png", ".jpg", ".jpeg"]:
                 st.image(uploaded_file, caption="Uploaded Image Preview", use_container_width=True)
-                uploaded_file.seek(0)  # Reset after preview read
+                uploaded_file.seek(0)
 
             st.success(f"✅ Loaded: {uploaded_file.name}")
 
             if st.button(" Extract & Validate"):
-                # Determine source type for extractor
                 source_type = "pdf" if file_ext == ".pdf" else "image"
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
 
-                with st.spinner(f"Gemini AI is reading your {file_ext.upper()[1:]}..."):
+                with st.status(f"LogiParse AI is reading your {file_ext.upper()[1:]}...", expanded=True) as status:
+                    st.write("📂 Scanning document layers...")
                     raw_result = process_invoice(tmp_path, source_type=source_type)
+                    
+                    st.write("⚖️ Validating logistics data...")
+                    status.update(label="File Processed Successfully!", state="complete", expanded=False)
 
                 os.unlink(tmp_path)
 

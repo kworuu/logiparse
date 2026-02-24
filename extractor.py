@@ -4,6 +4,7 @@ import base64
 from dotenv import load_dotenv
 import google.generativeai as genai
 from datetime import datetime
+import streamlit as st
 
 load_dotenv()
 my_secret_key = os.getenv("GEMINI_API_KEY")
@@ -35,7 +36,7 @@ Required keys:
 - items (list of objects with keys: description, quantity, unit_price, line_total)
 """
 
-
+@st.cache_data(show_spinner=False)
 def parse_invoice_from_file(file_path: str) -> dict:
     """
     Send a file (PDF, PNG, JPG) directly to Gemini for extraction.
@@ -69,6 +70,7 @@ def parse_invoice_from_file(file_path: str) -> dict:
         return _empty_result(f"Extraction failed: {e}")
 
 
+@st.cache_data(show_spinner=False)
 def parse_invoice_from_text(text: str) -> dict:
     """
     Send plain pasted text to Gemini for extraction.
